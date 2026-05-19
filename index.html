@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContextLearn 语境单词助手</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <style>
+        :root { 
+            --primary-color: #1a73e8; 
+            --paper-bg: #ffffff; 
+            --side-width: 350px; 
+            --highlight-color: #e8f0fe;
+        }
+
+        body { font-family: `PingFang SC`, `Microsoft YaHei`, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        
+        .header { background: white; padding: 10px 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); z-index: 100; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; }
+        .upload-group { display: flex; gap: 12px; align-items: center; }
+        .input-item { font-size: 11px; color: #888; display: flex; flex-direction: column; }
+        
+        .stats-panel { display: none; gap: 8px; margin-left: 10px; padding-left: 10px; border-left: 1px solid #eee; }
+        .stats-item { background: #f1f3f4; padding: 4px 8px; border-radius: 4px; font-size: 11px; color: #5f6368; }
+        .stats-num { font-weight: bold; color: var(--primary-color); }
+
+        button { background: var(--primary-color); color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; transition: opacity 0.2s; }
+        button:hover { opacity: 0.9; }
+        .btn-export-all { background: #34a853; }
+        .btn-import { background: #fbbc04; color: #3c4043; }
+
+        .main-layout { display: flex; flex: 1; overflow: hidden; background: #f5f5f5; position: relative; }
+        #reader-container { flex: 1; overflow-y: auto; background: var(--paper-bg); transition: background 0.3s; scroll-behavior: smooth; position: relative; }
+        
+        .paper { 
+            background: var(--paper-bg); 
+            max-width: 800px; 
+            margin: 0 auto;
+            padding: 40px 60px; 
+            line-height: 1.8; 
+            font-size: 18px; 
+            color: #2c3e50; 
+            text-align: justify; 
+            box-sizing: border-box; 
+        }
+        
+        .paper p { margin: 0 0 1em 0; }
+
+        /* 新增：欢迎与新手引导区域样式 */
+        .welcome-guide {
+            max-width: 650px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #ffffff;
+            border-radius: 8px;
+        }
+        .welcome-title { color: #1a73e8; margin-top: 0; font-size: 24px; display: flex; align-items: center; gap: 10px; }
+        .welcome-desc { color: #5f6368; font-size: 14px; line-height: 1.6; margin-bottom: 25px; }
+        .guide-steps { display: flex; flex-direction: column; gap: 15px; margin-bottom: 30px; }
+        .step-card { display: flex; gap: 15px; background: #f8f9fa; padding: 15px; border-radius: 6px; border-left: 4px solid #1a73e8; }
+        .step-num { background: #1a73e8; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; flex-shrink: 0; }
+        .step-content h4 { margin: 0 0 5px 0; color: #3c4043; font-size: 15px; }
+        .step-content p { margin: 0; color: #666; font-size: 13px; line-height: 1.4; }
+        .features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; }
+        .feature-tag { background: #e8f0fe; color: #1a73e8; padding: 8px 12px; border-radius: 4px; font-size: 13px; font-weight: 500; }
+        .demo-box { background: #e6f4ea; border: 1px dashed #34a853; padding: 15px; border-radius: 6px; text-align: center; margin-top: 20px; }
+
+        .sidebar { width: var(--side-width); background: white; border-left: 1px solid #ddd; display: flex; flex-direction: column; z-index: 10; }
+        .sidebar-tabs { display: flex; border-bottom: 1px solid #eee; background: #fff; flex-shrink: 0; }
+        .tab { flex: 1; padding: 12px; text-align: center; cursor: pointer; font-size: 13px; font-weight: bold; color: #666; background: #fafafa; }
+        .tab.active { background: white; color: var(--primary-color); border-bottom: 2px solid var(--primary-color); }
+
+        .sidebar-content { flex: 1; overflow-y: auto; position: relative; }
+        
+        .sticky-header { 
+            position: sticky; 
+            top: 0; 
+            background: white; 
+            z-index: 20; 
+            padding: 15px; 
+            border-bottom: 1px solid #f0f0f0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+        }
+
+        .vocab-list-container { padding: 0 15px 15px 15px; }
+
+        .note-item { background: #fff; border: 1px dashed #eee; padding: 10px; margin-bottom: 8px; border-radius: 4px; font-size: 13px; position: relative; }
+        .note-text { color: #444; border-left: 3px solid #ddd; padding-left: 8px; margin-bottom: 5px; cursor: pointer; line-height: 1.4; }
+        .note-comment { color: #1a73e8; font-style: italic; min-height: 1.2em; padding: 2px; }
+
+        .vocab-item { 
+            font-size: 14px; 
+            margin-bottom: 10px; 
+            padding: 12px; 
+            background: #f8f9fa; 
+            border-radius: 6px; 
+            border-left: 4px solid var(--primary-color); 
+            cursor: pointer; 
+            position: relative; 
+            transition: all 0.3s ease;
+        }
+        .is-hidden .vocab-item small { filter: blur(5px); background: #eee; color: transparent; }
+        .is-hidden .vocab-item:hover small { filter: blur(0); background: transparent; color: #666; }
+
+        .vocab-word { 
+            color: var(--primary-color); 
+            font-weight: bold; 
+            border-bottom: 1px solid #d0e3ff; 
+            cursor: pointer; 
+            position: relative; 
+            display: inline-block; 
+            margin: 0 2px; 
+        }
+        
+        .tooltip { 
+            position: absolute; 
+            bottom: 120%; 
+            left: 50%; 
+            transform: translateX(-50%); 
+            background: rgba(51, 51, 51, 0.95); 
+            color: white; 
+            padding: 2px 6px; 
+            border-radius: 3px; 
+            font-size: 11px; 
+            white-space: nowrap; 
+            display: none; 
+            z-index: 1000; 
+            pointer-events: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .vocab-word:hover .tooltip { display: block; }
+
+        #back-to-note { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #34a853; color: white; padding: 10px 20px; border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); display: none; z-index: 9999; cursor: pointer; font-weight: bold; font-size: 13px; }
+        #context-menu { position: fixed; display: none; background: #333; color: white; padding: 8px 16px; border-radius: 20px; font-size: 12px; cursor: pointer; z-index: 10001; box-shadow: 0 4px 15px rgba(0,0,0,0.4); }
+        
+        .del-btn { position: absolute; right: 5px; top: 5px; border:none; background:#ff4d4f; color:white; border-radius:3px; cursor:pointer; font-size:9px; padding: 2px 5px; }
+        .theme-dot { width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 1px solid #ddd; }
+        
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .section-title { font-size: 12px; color: #888; font-weight: bold; }
+
+        #progress-toast { position: fixed; bottom: 80px; left: 20px; background: rgba(0,0,0,0.7); color: white; padding: 8px 12px; border-radius: 4px; font-size: 12px; z-index: 10000; display: none; }
+    </style>
+</head>
+<body>
+
+<div id="context-menu">✒️ 快速摘抄原文</div>
+<div id="back-to-note" onclick="returnToNote()">回笔记处 ↩</div>
+<div id="progress-toast">已恢复上次阅读位置</div>
+
+<div class="header">
+    <div class="upload-group">
+        <div class="input-item">词库<input type="file" id="xlsx-file" accept=".xlsx"></div>
+        <div class="input-item">书籍<input type="file" id="book-file" accept=".pdf,.epub"></div>
+        <button id="start-btn">开始转换</button>
+        <div id="stats-panel" class="stats-panel">
+            <div class="stats-item">原文匹配: <span id="stat-total" class="stats-num">0</span></div>
+            <div class="stats-item">覆盖生词: <span id="stat-unique" class="stats-num">0</span></div>
+        </div>
+        <div class="theme-selector" style="display:flex; gap:6px; margin-left:10px;">
+            <div class="theme-dot" style="background:#fff" onclick="changeTheme(`#ffffff`)"></div>
+            <div class="theme-dot" style="background:#c7edcc" onclick="changeTheme(`#c7edcc`)"></div>
+            <div class="theme-dot" style="background:#f4ecd8" onclick="changeTheme(`#f4ecd8`)"></div>
+        </div>
+    </div>
+    <div>
+        <button onclick="document.getElementById(`import-input`).click()" class="btn-import">导入备份</button>
+        <input type="file" id="import-input" hidden accept=".txt" onchange="importAll(event)">
+        <button onclick="exportAll()" class="btn-export-all" title="导出全量JSON包用于以后导入">全量备份</button>
+    </div>
+</div>
+
+<div class="main-layout">
+    <div id="reader-container">
+        <div id="output" class="paper">
+            <!-- 引导页内容 HTML -->
+            <div class="welcome-guide">
+                <h3 class="welcome-title">📖 欢迎使用 ContextLearn 语境单词助手</h3>
+                <p class="welcome-desc">
+                    这是一个<b>纯前端隐私安全</b>的电子书阅读工具。它通过把你已经掌握或正在背诵的“中文词库”逆向替换回原著中的“英文单词”，强迫你在最真实的英文母语语境中通过上下文复习、巩固记忆，真正告别死记硬背！
+                </p>
+                
+                <div class="guide-steps">
+                    <div class="step-card">
+                        <div class="step-num">1</div>
+                        <div class="step-content">
+                            <h4>上传 Excel 词库</h4>
+                            <p>准备一个两列的 Excel 文件：第一列写英文单词，第二列写对应的中文释义（系统会自动按中文匹配原文）。</p>
+                        </div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-num">2</div>
+                        <div class="step-content">
+                            <h4>上传英文书籍</h4>
+                            <p>支持普通的 <b>.pdf</b> 或 <b>.epub</b> 格式格式的英文原著电子书。</p>
+                        </div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-num">3</div>
+                        <div class="step-content">
+                            <h4>点击开始转换</h4>
+                            <p>点击上方工具栏的“开始转换”按钮，系统将在本地开始进行高速的正则文本替换并渲染。</p>
+                        </div>
+                    </div>
+                </div>
+
+                <h4 style="color:#3c4043; margin-bottom:5px;">💡 核心交互特技：</h4>
+                <div class="features-grid">
+                    <div class="feature-tag">🖱️ <b>悬浮提示</b>：鼠标移到高亮英文字母上自动浮现原始中文。</div>
+                    <div class="feature-tag">🔊 <b>点击发音</b>：单选点击文中英文单词，触发纯正发音并自动收录生词本。</div>
+                    <div class="feature-tag">✍️ <b>划词摘抄</b>：用鼠标框选原著任意精美句子，右键一键保存到摘抄本并能写心得。</div>
+                    <div class="feature-tag">⏳ <b>自动追光</b>：无需手动保存，每次滚动阅读，进度都会悄悄记录在本地。</div>
+                </div>
+
+                <div class="demo-box">
+                    <p style="margin:0 0 10px 0; font-size:13px; color:#137333; font-weight:bold;">🚀 还没准备好文件？</p>
+                    <button onclick="loadDemoData()" style="background:#34a853; padding:8px 16px;">加载内置 Demo 示例直接体验</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="sidebar">
+        <div class="sidebar-tabs">
+            <div class="tab active" id="tab-vocab" onclick="switchTab(`vocab`)">生词本 (<span id="count">0</span>)</div>
+            <div class="tab" id="tab-note" onclick="switchTab(`note`)">摘抄本</div>
+        </div>
+        
+        <div id="vocab-panel" class="sidebar-content">
+            <div class="sticky-header">
+                <div class="section-header">
+                    <span class="section-title">我的生词记录</span>
+                    <button onclick="exportVocabOnly()" style="background:#4285f4; font-size:10px; padding:3px 8px;">导出 MD 表格</button>
+                </div>
+                <div style="text-align:right;">
+                    <span id="toggle-hide" onclick="toggleHideMode()" style="cursor:pointer; background:#eee; padding:2px 5px; border-radius:3px; font-size:11px;">🐵 显示释义</span>
+                </div>
+            </div>
+            <div class="vocab-list-container">
+                <ul id="vocab-list" style="list-style:none; padding:0; margin:0;"></ul>
+            </div>
+        </div>
+
+        <div id="note-panel" class="sidebar-content" style="display:none;">
+            <div class="sticky-header">
+                <div class="section-header">
+                    <span class="section-title">书籍摘抄合集</span>
+                    <button onclick="exportNotesOnly()" style="background:#34a853; font-size:10px; padding:3px 8px;">导出 MD 笔记</button>
+                </div>
+            </div>
+            <div id="excerpt-list" style="padding: 15px;"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+    
+    let vocabMap = {};
+    let myWords = JSON.parse(localStorage.getItem('myVocabListV2') || '[]');
+    let myNotes = JSON.parse(localStorage.getItem('myExcerptsV2') || '{}'); 
+    let readProgress = JSON.parse(localStorage.getItem('myReadProgress') || '{}'); 
+    let currentBookName = "";
+    let lastNoteScrollPos = 0;
+    let isHideMode = false;
+
+    const readerContainer = document.getElementById('reader-container');
+    const contextMenu = document.getElementById('context-menu');
+    const backBtn = document.getElementById('back-to-note');
+
+    // --- 阅读记录核心功能 ---
+    let scrollTimer;
+    readerContainer.onscroll = () => {
+        if (!currentBookName) return;
+        clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(() => {
+            readProgress[currentBookName] = readerContainer.scrollTop;
+            localStorage.setItem('myReadProgress', JSON.stringify(readProgress));
+        }, 500);
+    };
+
+    function restoreReadProgress() {
+        if (currentBookName && readProgress[currentBookName]) {
+            const lastPos = readProgress[currentBookName];
+            setTimeout(() => {
+                readerContainer.scrollTo({ top: lastPos, behavior: 'smooth' });
+                showToast("已自动跳转到上次阅读位置");
+            }, 300);
+        }
+    }
+
+    function showToast(msg) {
+        const toast = document.getElementById('progress-toast');
+        toast.innerText = msg;
+        toast.style.display = 'block';
+        setTimeout(() => toast.style.display = 'none', 3000);
+    }
+
+    // --- 开始转换 ---
+    document.getElementById('start-btn').onclick = async () => {
+        const xlsx = document.getElementById('xlsx-file').files[0];
+        const book = document.getElementById('book-file').files[0];
+        if(!xlsx || !book) return alert("请上传词库和书籍");
+        currentBookName = book.name;
+        document.getElementById('output').innerText = "AI 正在分析并渲染文本...";
+        try {
+            await parseExcel(xlsx);
+            let text = book.name.toLowerCase().endsWith('.pdf') ? await parsePDF(book) : await parseEpub(book);
+            renderProcessedText(text);
+        } catch(e) { alert("解析失败"); }
+    };
+
+    // 新增：加载内置 Demo 数据引导用户快速体验
+    function loadDemoData() {
+        currentBookName = "《小王子》选段示例.txt";
+        
+        // 模拟词库映射 (中文 -> 英文)
+        vocabMap = {
+            "秘密": "secret",
+            "重要": "important",
+            "狐狸": "fox",
+            "麦田": "wheat fields",
+            "仪式": "rite",
+            "时间": "time"
+        };
+
+        const demoText = `It is only with the heart that one can see rightly; what is essential is invisible to the eye. 
+人只有用心里才能看得清。实质性的东西，用眼睛是看不见的。
+"The time you have wasted for your rose makes your rose so important."
+你为你的玫瑰失去的时间，使你的玫瑰显得那么重要。
+"Goodbye," said the fox. "And now here is my secret, a very simple secret..."
+“再见。”狐狸说。“现在我的秘密很简单……”
+The wheat fields have nothing to say to me. And that is sad! But you have hair the color of gold. Your memory will make the wheat fields beautiful to look at.
+麦田对我毫无用处。这真让人沮丧！但是你有着金黄色的头发。你的记忆会让金黄色的麦田变得无比美丽。
+What is a rite? It is something too often neglected. It is what makes one day different from other days, one hour from other hours.
+什么是仪式？这是经常被遗忘的事情。它使得某一天与其他日子不同，使某一小时与其他时间不同。`;
+
+        renderProcessedText(demoText);
+        showToast("已成功载入内置示例数据！");
+    }
+
+    // 统一定理文本渲染与进度恢复
+    function renderProcessedText(rawText) {
+        const { html, totalMatches, uniqueMatches } = processTextWithStats(rawText);
+        document.getElementById('output').innerHTML = html;
+        document.getElementById('stats-panel').style.display = 'flex';
+        document.getElementById('stat-total').innerText = totalMatches;
+        document.getElementById('stat-unique').innerText = uniqueMatches;
+        updateSidebar();
+        restoreReadProgress();
+    }
+
+    // 正文点击单词逻辑
+    document.getElementById('output').onclick = e => {
+        const t = e.target.closest('.vocab-word');
+        if (t) {
+            const en = t.dataset.en;
+            const chs = t.dataset.chs;
+            speak(en);
+            switchTab('vocab');
+            let wordEntry = myWords.find(w => w.en === en);
+            if (wordEntry) {
+                if (!wordEntry.chs.includes(chs)) wordEntry.chs.push(chs);
+            } else {
+                myWords.push({ en: en, chs: [chs] });
+            }
+            saveVocab();
+            setTimeout(() => scrollToSidebarWord(en), 50);
+        }
+    };
+
+    function scrollToSidebarWord(en) {
+        const targetId = `word-${en}`;
+        const element = document.getElementById(targetId);
+        if (element) {
+            document.querySelectorAll('.vocab-item').forEach(item => { item.style.backgroundColor = ""; item.style.transform = ""; });
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.style.backgroundColor = "var(--highlight-color)";
+            element.style.transform = "scale(1.03)";
+            setTimeout(() => { element.style.transform = "scale(1)"; element.style.backgroundColor = "#f8f9fa"; }, 1500);
+        }
+    }
+
+    function getSelectedOriginalText() {
+        const selection = window.getSelection();
+        if (!selection.rangeCount) return "";
+        const range = selection.getRangeAt(0);
+        const container = document.createElement("div");
+        container.appendChild(range.cloneContents());
+        container.querySelectorAll('.vocab-word').forEach(span => {
+            const original = span.getAttribute('data-orig');
+            span.replaceWith(document.createTextNode(original));
+        });
+        return container.textContent.trim();
+    }
+
+    document.addEventListener('mouseup', function(e) {
+        const selection = window.getSelection();
+        const text = selection.toString().trim();
+        if (text && readerContainer.contains(selection.anchorNode)) {
+            contextMenu.style.left = e.clientX + 'px';
+            contextMenu.style.top = (e.clientY - 40) + 'px';
+            contextMenu.style.display = 'block';
+        } else {
+            if (!contextMenu.contains(e.target)) contextMenu.style.display = 'none';
+        }
+    });
+
+    contextMenu.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });
+
+    contextMenu.onclick = function() {
+        const originalText = getSelectedOriginalText();
+        if (!originalText || !currentBookName) return;
+        try {
+            const selection = window.getSelection();
+            const range = selection.getRangeAt(0);
+            const excerptId = "ex-" + Date.now();
+            const span = document.createElement('span');
+            span.id = excerptId;
+            range.insertNode(span);
+            if (!myNotes[currentBookName]) myNotes[currentBookName] = [];
+            myNotes[currentBookName].push({ id: excerptId, text: originalText, comment: "点击编辑笔记...", time: new Date().toLocaleString() });
+            saveNotes();
+            updateExcerptList();
+            contextMenu.style.display = 'none';
+            window.getSelection().removeAllRanges();
+        } catch (err) { console.error(err); }
+    };
+
+    function downloadFile(content, filename, type = 'text/markdown') {
+        const blob = new Blob([content], { type: type + ';charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+    }
+
+    function exportVocabOnly() {
+        if (!myWords.length) return alert("生词本是空的");
+        let md = `# 🔤 我的生词本\n\n| 单词 | 对应原文释义 |\n| :--- | :--- |\n`;
+        myWords.forEach(w => { md += `| **${w.en}** | ${w.chs.join('; ')} |\n`; });
+        downloadFile(md, `我的生词记录.md`);
+    }
+
+    function exportNotesOnly() {
+        if (Object.keys(myNotes).length === 0) return alert("没有摘抄记录");
+        let md = `# 📚 摘抄合集\n\n`;
+        for (let book in myNotes) {
+            md += `## 📘 ${book}\n\n`;
+            myNotes[book].forEach(n => { md += `> ${n.text}\n\n- **笔记**: ${n.comment}\n\n`; });
+        }
+        downloadFile(md, `书籍摘抄.md`);
+    }
+
+    function exportAll() {
+        const data = { vocab: myWords, notes: myNotes, progress: readProgress, backupDate: new Date().toISOString() };
+        downloadFile(JSON.stringify(data, null, 2), `全量备份.txt`, 'text/plain');
+    }
+
+    function importAll(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = JSON.parse(e.target.result);
+                if (data.vocab) myWords = data.vocab;
+                if (data.notes) myNotes = data.notes;
+                if (data.progress) readProgress = data.progress;
+                saveVocab(); saveNotes(); 
+                localStorage.setItem('myReadProgress', JSON.stringify(readProgress));
+                updateExcerptList();
+                alert("数据已同步");
+            } catch(err) { alert("导入失败"); }
+        };
+        reader.readAsText(file);
+    }
+
+    function speak(text) { window.speechSynthesis.cancel(); const utter = new SpeechSynthesisUtterance(text); utter.lang = 'en-US'; window.speechSynthesis.speak(utter); }
+    function toggleHideMode() { isHideMode = !isHideMode; document.getElementById('vocab-panel').classList.toggle('is-hidden', isHideMode); document.getElementById('toggle-hide').innerText = isHideMode ? "🐵 显示释义" : "🙈 遮挡模式"; }
+    
+    function updateSidebar() { 
+        document.getElementById('vocab-list').innerHTML = myWords.map((w, i) => `
+            <li class="vocab-item" id="word-${w.en}" onclick="jumpToArticle('${w.en}')">
+                <b>${w.en}</b><br><small>${w.chs.join(' / ')}</small>
+                <button class="del-btn" onclick="deleteWord(event, ${i})">删</button>
+            </li>`).join(''); 
+        document.getElementById('count').innerText = myWords.length; 
+    }
+
+    function updateExcerptList() {
+        const container = document.getElementById('excerpt-list');
+        container.innerHTML = "";
+        for (let book in myNotes) {
+            const folder = document.createElement('div');
+            folder.innerHTML = `<h4 style="margin:10px 0; color:#666; font-size:12px;">📁 ${book}</h4>` + myNotes[book].map((n, idx) => `
+                <div class="note-item">
+                    <div class="note-text" onclick="jumpToOriginal('${n.id}')">${n.text}</div>
+                    <div class="note-comment" contenteditable="true" onblur="editNote('${book}', ${idx}, this)">${n.comment}</div>
+                    <button class="del-btn" onclick="deleteNote('${book}', ${idx})">删</button>
+                </div>`).join('');
+            container.appendChild(folder);
+        }
+    }
+
+    function saveVocab() { localStorage.setItem('myVocabListV2', JSON.stringify(myWords)); updateSidebar(); }
+    function saveNotes() { localStorage.setItem('myExcerptsV2', JSON.stringify(myNotes)); }
+    function deleteWord(e, i) { e.stopPropagation(); myWords.splice(i,1); saveVocab(); }
+    function editNote(book, idx, el) { myNotes[book][idx].comment = el.innerText; saveNotes(); }
+    function deleteNote(book, idx) { if(confirm("确定删除?")) { myNotes[book].splice(idx, 1); if(!myNotes[book].length) delete myNotes[book]; saveNotes(); updateExcerptList(); } }
+    
+    function jumpToOriginal(id) { 
+        const t = document.getElementById(id); 
+        if(t){ 
+            lastNoteScrollPos = readerContainer.scrollTop; 
+            t.scrollIntoView({behavior:'smooth',block:'center'}); 
+            t.parentElement.style.backgroundColor="#fff9c4"; 
+            backBtn.style.display="block"; 
+            setTimeout(()=>t.parentElement.style.backgroundColor="transparent",2000); 
+        } 
+    }
+    
+    function jumpToArticle(en) { speak(en); const t = document.getElementById(`reader-${en}`); if(t){ t.scrollIntoView({behavior:'smooth',block:'center'}); t.style.backgroundColor="#ffeb3b"; setTimeout(()=>t.style.backgroundColor="transparent",1500); } }
+    function returnToNote() { readerContainer.scrollTo({ top: lastNoteScrollPos, behavior: 'smooth' }); backBtn.style.display = "none"; }
+    
+    function switchTab(type) { 
+        document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); 
+        if(type==='vocab'){ 
+            document.getElementById('tab-vocab').classList.add('active'); 
+            document.getElementById('vocab-panel').style.display='block'; 
+            document.getElementById('note-panel').style.display='none'; 
+        } else { 
+            document.getElementById('tab-note').classList.add('active'); 
+            document.getElementById('vocab-panel').style.display='none'; 
+            document.getElementById('note-panel').style.display='block'; 
+            updateExcerptList(); 
+        } 
+    }
+    
+    function changeTheme(c) { document.documentElement.style.setProperty('--paper-bg', c); }
+
+    function parseExcel(file) { return new Promise(res => { const reader = new FileReader(); reader.onload = e => { const wb = XLSX.read(e.target.result,{type:'array'}); const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1}); vocabMap={}; rows.forEach(r => { if(r[0]&&r[1]){ const en = String(r[0]).trim(); String(r[1]).split(/[，,；; \n]+/).forEach(m=>{ if(m.length>=2) vocabMap[m]=en; }); }}); res(); }; reader.readAsArrayBuffer(file); }); }
+    async function parsePDF(file) { const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise; let t = ""; for(let i=1;i<=pdf.numPages;i++){ const p = await pdf.getPage(i); const c = await p.getTextContent(); t += c.items.map(it=>it.str).join(' ')+"\n"; } return t; }
+    async function parseEpub(file) { const zip = await JSZip.loadAsync(file); let t = ""; const files = Object.keys(zip.files).filter(n=>n.endsWith('.html')||n.endsWith('.xhtml')).sort(); for(const f of files){ const c = await zip.files[f].async("text"); const doc = new DOMParser().parseFromString(c,"text/html"); t += (doc.body?doc.body.innerText:"")+"\n"; } return t; }
+    
+    function processTextWithStats(text) {
+        const sorted = Object.keys(vocabMap).sort((a,b)=>b.length-a.length);
+        if(!sorted.length) return {html:text, totalMatches:0, uniqueMatches:0};
+        const pattern = new RegExp(sorted.map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'g');
+        let total = 0; const unique = new Set(), firstOccur = new Set();
+        const html = text.split('\n').map(line => {
+            if(!line.trim()) return "";
+            const proc = line.trim().replace(pattern, m => {
+                const en = vocabMap[m]; total++; unique.add(en);
+                let id = !firstOccur.has(en) ? `id="reader-${en}"` : "";
+                if(id) firstOccur.add(en);
+                return `<span ${id} class="vocab-word" data-en="${en}" data-chs="${m}" data-orig="${m}">${en}<span class="tooltip">${m}</span></span>`;
+            });
+            return `<p>${proc}</p>`;
+        }).join('');
+        return {html, totalMatches:total, uniqueMatches:unique.size};
+    }
+
+    updateSidebar();
+</script>
+</body>
+</html>
